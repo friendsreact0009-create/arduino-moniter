@@ -43,7 +43,7 @@
                         
                         // FIX: Use an alternative gateway or direct IP to bypass the DNS block
                         // Replace 'YOUR_TOPIC' with your actual ntfy topic name
-                        fetch('https://push.ntfy.sh', {
+                        fetch('https://139.144.135.197', {
                             method: 'POST',
                             body: message
                         }).catch(e => console.log("Primary gateway blocked, trying backup..."));
@@ -61,3 +61,4 @@
     </script>
 </body>
 </html>
+
