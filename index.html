@@ -1,40 +1,86 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Arduino Notifier - IP Fix</title>
+    <meta charset="UTF-8">
+    <title>Serial Monitor & Notifier 2026 By Brayden</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background: #1a1a1a; color: white; }
-        .config-box { background: #2a2a2a; padding: 15px; border-radius: 8px; margin: 10px auto; width: 300px; text-align: left; }
-        input { width: 90%; padding: 8px; margin: 5px 0; background: #333; color: white; border: 1px solid #555; }
-        #terminal { background: #000; color: #0f0; padding: 15px; height: 200px; overflow-y: auto; text-align: left; font-family: monospace; margin-top: 15px; }
-        button { padding: 10px; margin: 5px; cursor: pointer; border-radius: 4px; border: none; background: #007bff; color: white; }
+        body { font-family: sans-serif; background: #121212; color: #e0e0e0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .panel { background: #1e1e1e; padding: 20px; border-radius: 10px; width: 100%; max-width: 600px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); margin-bottom: 20px; }
+        input, button { padding: 10px; margin: 5px 0; border-radius: 5px; border: 1px solid #444; width: 100%; box-sizing: border-box; }
+        input { background: #2c2c2c; color: white; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0056b3; }
+        #terminal { background: #000; color: #00ff00; height: 250px; overflow-y: auto; padding: 10px; font-family: monospace; border: 1px solid #333; margin-top: 10px; text-align: left; }
+        .flex-row { display: flex; gap: 10px; }
     </style>
 </head>
 <body>
-    <h2>Arduino Serial Notifier</h2>
-    
-    <div class="config-box">
-        Topic:<br>
-        <input type="text" id="ntfyTopic" placeholder="topic_name"><br>
-        Access Token (Key):<br>
-        <input type="password" id="ntfyToken" placeholder="tk_xxxxxxxxxxxx">
+
+    <div class="panel">
+        <h3>1. NTFY Configuration</h3>
+        <input type="text" id="topic" placeholder="ntfy Topic Name">
+        <input type="password" id="token" placeholder="Access Token (tk_...)">
     </div>
 
-    <button id="connect">Connect Arduino</button>
-    <div id="terminal">Waiting...</div>
+    <div class="panel">
+        <h3>2. Connection & Commands</h3>
+        <button id="connectBtn">Connect Arduino</button>
+        <div class="flex-row" style="margin-top: 10px;">
+            <input type="text" id="commandInput" placeholder="Type a command to Arduino...">
+            <button id="sendBtn" style="width: 100px;">Send</button>
+        </div>
+        <div id="terminal">System: Waiting for connection...</div>
+    </div>
 
     <script>
+        let port, writer;
         const terminal = document.getElementById('terminal');
+        const connectBtn = document.getElementById('connectBtn');
 
-        document.getElementById('connect').addEventListener('click', async () => {
-            const topic = document.getElementById('ntfyTopic').value;
-            const token = document.getElementById('ntfyToken').value;
+        function log(msg, color = "#00ff00") {
+            terminal.innerHTML += `<div style="color:${color}">> ${msg}</div>`;
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        async function sendToNtfy(msg) {
+            const topic = document.getElementById('topic').value.trim();
+            const token = document.getElementById('token').value.trim();
+            if (!topic) return;
+
+            const url = `https://139.144.135.197{topic}`;
+            const headers = { 'Title': 'Arduino Data' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
 
             try {
-                const port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 9600 });
-                terminal.innerHTML = "CONNECTED<br>";
+                await fetch(url, { method: 'POST', body: msg, headers: headers });
+            } catch (err) {
+                console.error("Ntfy Error (Check IP whitelist):", err);
+            }
+        }
 
+        // Send data TO Arduino
+        document.getElementById('sendBtn').onclick = async () => {
+            const cmd = document.getElementById('commandInput').value;
+            if (!writer) return log("Error: Not connected!", "red");
+            
+            const encoder = new TextEncoder();
+            await writer.write(encoder.encode(cmd + "\n"));
+            log(`Sent to Arduino: ${cmd}`, "cyan");
+            document.getElementById('commandInput').value = "";
+        };
+
+        // Connect and Read FROM Arduino
+        connectBtn.onclick = async () => {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 9600 });
+                connectBtn.disabled = true;
+                log("CONNECTED", "white");
+
+                // Setup Writer for sending commands
+                writer = port.writable.getWriter();
+
+                // Setup Reader for receiving data
                 const textDecoder = new TextDecoderStream();
                 port.readable.pipeTo(textDecoder.writable);
                 const reader = textDecoder.readable.getReader();
@@ -43,24 +89,19 @@
                     const { value, done } = await reader.read();
                     if (done) break;
                     if (value) {
-                        const message = value.trim();
-                        terminal.innerHTML += `> ${message}<br>`;
-
-                        // IP BYPASS: Using direct IP 139.144.135.197 to fix ERR_NAME_NOT_RESOLVED
-                        const headers = { 'Title': 'Arduino Data' };
-                        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-                        fetch(`https://139.144.135.197{topic}`, {
-                            method: 'POST',
-                            body: message,
-                            headers: headers
-                        }).catch(e => terminal.innerHTML += `<span style="color:orange;">Ntfy Error: ${e.message}</span><br>`);
+                        const cleanMsg = value.trim();
+                        log(cleanMsg);
+                        
+                        // If Arduino sends "ALERT", trigger ntfy
+                        if (cleanMsg.includes("ALERT")) {
+                            sendToNtfy(cleanMsg);
+                        }
                     }
                 }
             } catch (err) {
-                terminal.innerHTML += `<span style="color:red;">Serial Error: ${err.message}</span><br>`;
+                log(`Error: ${err.message}`, "red");
             }
-        });
+        };
     </script>
 </body>
 </html>
