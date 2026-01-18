@@ -1,34 +1,39 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Arduino Notifier Fix</title>
+    <title>Arduino Notifier - IP Fix</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 50px; background: #1a1a1a; color: white; }
-        #terminal { background: #000; color: #0f0; padding: 20px; height: 250px; overflow-y: auto; text-align: left; border: 1px solid #444; margin-top: 20px; }
-        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #1a1a1a; color: white; }
+        .config-box { background: #2a2a2a; padding: 15px; border-radius: 8px; margin: 10px auto; width: 300px; text-align: left; }
+        input { width: 90%; padding: 8px; margin: 5px 0; background: #333; color: white; border: 1px solid #555; }
+        #terminal { background: #000; color: #0f0; padding: 15px; height: 200px; overflow-y: auto; text-align: left; font-family: monospace; margin-top: 15px; }
+        button { padding: 10px; margin: 5px; cursor: pointer; border-radius: 4px; border: none; background: #007bff; color: white; }
     </style>
 </head>
 <body>
-    <h1>Arduino Serial Notifier</h1>
-    <button id="connect">1. Connect Arduino</button>
-    <button id="notifyReq">2. Enable Alerts</button>
-    <div id="terminal"></div>
+    <h2>Arduino Serial Notifier</h2>
+    
+    <div class="config-box">
+        Topic:<br>
+        <input type="text" id="ntfyTopic" placeholder="topic_name"><br>
+        Access Token (Key):<br>
+        <input type="password" id="ntfyToken" placeholder="tk_xxxxxxxxxxxx">
+    </div>
+
+    <button id="connect">Connect Arduino</button>
+    <div id="terminal">Waiting...</div>
 
     <script>
-        const connectBtn = document.getElementById('connect');
-        const notifyBtn = document.getElementById('notifyReq');
         const terminal = document.getElementById('terminal');
 
-        notifyBtn.addEventListener('click', () => {
-            Notification.requestPermission();
-        });
+        document.getElementById('connect').addEventListener('click', async () => {
+            const topic = document.getElementById('ntfyTopic').value;
+            const token = document.getElementById('ntfyToken').value;
 
-        connectBtn.addEventListener('click', async () => {
             try {
                 const port = await navigator.serial.requestPort();
                 await port.open({ baudRate: 9600 });
-                connectBtn.disabled = true;
-                terminal.innerHTML += "Connected!<br>";
+                terminal.innerHTML = "CONNECTED<br>";
 
                 const textDecoder = new TextDecoderStream();
                 port.readable.pipeTo(textDecoder.writable);
@@ -40,25 +45,22 @@
                     if (value) {
                         const message = value.trim();
                         terminal.innerHTML += `> ${message}<br>`;
-                        
-                        // FIX: Use an alternative gateway or direct IP to bypass the DNS block
-                        // Replace 'YOUR_TOPIC' with your actual ntfy topic name
-                        fetch('https://139.144.135.197', {
-                            method: 'POST',
-                            body: message
-                        }).catch(e => console.log("Primary gateway blocked, trying backup..."));
 
-                        // Browser notification backup
-                        if (Notification.permission === "granted") {
-                            new Notification("Arduino Alert", { body: message });
-                        }
+                        // IP BYPASS: Using direct IP 139.144.135.197 to fix ERR_NAME_NOT_RESOLVED
+                        const headers = { 'Title': 'Arduino Data' };
+                        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                        fetch(`https://139.144.135.197{topic}`, {
+                            method: 'POST',
+                            body: message,
+                            headers: headers
+                        }).catch(e => terminal.innerHTML += `<span style="color:orange;">Ntfy Error: ${e.message}</span><br>`);
                     }
                 }
             } catch (err) {
-                terminal.innerHTML += `<span style="color:red;">Error: ${err.message}</span><br>`;
+                terminal.innerHTML += `<span style="color:red;">Serial Error: ${err.message}</span><br>`;
             }
         });
     </script>
 </body>
 </html>
-
