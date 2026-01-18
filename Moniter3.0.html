@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Arduino Security Monitor</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: #00ff41; padding: 20px; }
+        #terminal { background: #000; height: 300px; overflow-y: scroll; padding: 10px; border: 1px solid #333; margin-bottom: 10px; font-family: monospace; }
+        .timestamp { color: #888; font-size: 0.8em; margin-right: 8px; }
+        .control-panel { background: #222; padding: 15px; border-radius: 5px; margin-bottom: 10px; }
+        input, button { padding: 8px; font-size: 1rem; border-radius: 4px; border: none; }
+        button { cursor: pointer; background: #00ff41; color: #000; font-weight: bold; }
+        button:hover { background: #00cc33; }
+        #disconnectBtn { background: #ff4444; color: white; margin-left: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>Arduino Security System Terminal</h2>
+
+    <div class="control-panel">
+        <button id="connectBtn">Connect to Arduino</button>
+        <button id="disconnectBtn" style="display:none;">Disconnect</button>
+        <p>Status: <span id="status">Disconnected</span></p>
+    </div>
+
+    <div id="terminal"></div>
+
+    <div class="control-panel">
+        <input type="text" id="serialInput" placeholder="Enter master code (0229)...">
+        <button id="sendBtn">Send Command</button>
+    </div>
+
+    <script>
+        let port;
+        let reader;
+        let keepReading = true;
+
+        const terminal = document.getElementById('terminal');
+        const statusSpan = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+
+        async function connect() {
+            try {
+                // Request Permission (Must be inside user gesture)
+                if (Notification.permission !== "granted") {
+                    await Notification.requestPermission();
+                }
+
+                // Request and open port
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 9600 });
+                
+                statusSpan.textContent = "Connected";
+                connectBtn.style.display = "none";
+                disconnectBtn.style.display = "inline";
+                keepReading = true;
+
+                readLoop();
+            } catch (error) {
+                console.error(error);
+                alert("Failed to connect. Check if another app is using the port.");
+            }
+        }
+
+        async function readLoop() {
+            const textDecoder = new TextDecoderStream();
+            const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+            reader = textDecoder.readable.getReader();
+
+            let buffer = "";
+            try {
+                while (keepReading) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += value;
+                    if (buffer.includes("\n")) {
+                        const lines = buffer.split("\n");
+                        buffer = lines.pop(); 
+                        lines.forEach(line => {
+                            if(line.trim()) {
+                                appendToTerminal(line.trim());
+                                sendNotification(line.trim());
+                            }
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error("Read error:", err);
+            } finally {
+                reader.releaseLock();
+            }
+        }
+
+        async function sendCommand() {
+            const inputField = document.getElementById('serialInput');
+            const command = inputField.value;
+            
+            if (port && port.writable) {
+                const encoder = new TextEncoder();
+                const writer = port.writable.getWriter();
+                await writer.write(encoder.encode(command + "\n"));
+                writer.releaseLock(); // Must unlock so port can be closed later
+                appendToTerminal("SENT: " + command);
+                inputField.value = "";
+            } else {
+                alert("Connect to Arduino first!");
+            }
+        }
+
+        function appendToTerminal(text) {
+            const div = document.createElement('div');
+            const now = new Date();
+            const ts = `[${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}]`;
+            div.innerHTML = `<span class="timestamp">${ts}</span> ${text}`;
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function sendNotification(message) {
+            if (Notification.permission === "granted") {
+                new Notification("Arduino Alert", { body: message });
+            }
+        }
+
+        disconnectBtn.addEventListener('click', async () => {
+            keepReading = false;
+            await reader.cancel(); // Force reader.read() to resolve
+            await port.close();
+            statusSpan.textContent = "Disconnected";
+            connectBtn.style.display = "inline";
+            disconnectBtn.style.display = "none";
+        });
+
+        connectBtn.addEventListener('click', connect);
+        document.getElementById('sendBtn').addEventListener('click', sendCommand);
+        document.getElementById('serialInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendCommand();
+        });
+    </script>
+</body>
+</html>
